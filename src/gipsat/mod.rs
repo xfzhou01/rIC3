@@ -65,12 +65,71 @@ impl Solver {
         let mut file = File::create(path)?;
 
         // Write the problem header
-        writeln!(file, "p cnf {} {}", self.num_var(), self.cdb.num_clauses())?;
+        let learnt_len = self.cdb.learnt.len();
+        let lemmas_len = self.cdb.lemmas.len();
+        let trans_len = self.cdb.trans.len();
+        let temporary_len = self.cdb.temporary.len();
+        let mut cdb_num_clauses = learnt_len + lemmas_len + trans_len + temporary_len;
+        // println!("learnt: {}, lemmas {}, trans {}, temporary {}", 
+        //     learnt_len, lemmas_len, trans_len, temporary_len);
+        if !self.assump.is_empty() {
+            cdb_num_clauses += 1;
+        }
+        writeln!(file, "p cnf {} {}", self.num_var(), cdb_num_clauses)?;
 
         // Write the clauses
-        for clause in self.cdb.clauses() {
-            for lit in clause.lits() {
-                let lit_value = if lit.polarity() { lit.var().into() } else { -(lit.var().into() as i32) };
+        for clause_ref in self.cdb.learnt.clone() {
+            let clause = self.cdb.get(clause_ref);
+            for lit in clause.slice() {
+                let lit_value = if lit.polarity() {
+                    let v:i32 = lit.var().into();
+                    v
+                } else {
+                    let v:i32 = lit.var().into();
+                    -v
+                };
+                write!(file, "{} ", lit_value)?;
+            }
+            writeln!(file, "0")?;
+        }
+        for clause_ref in self.cdb.lemmas.clone() {
+            let clause = self.cdb.get(clause_ref);
+            for lit in clause.slice() {
+                let lit_value = if lit.polarity() {
+                    let v:i32 = lit.var().into();
+                    v
+                } else {
+                    let v:i32 = lit.var().into();
+                    -v
+                };
+                write!(file, "{} ", lit_value)?;
+            }
+            writeln!(file, "0")?;
+        }
+        for clause_ref in self.cdb.trans.clone() {
+            let clause = self.cdb.get(clause_ref);
+            for lit in clause.slice() {
+                let lit_value = if lit.polarity() {
+                    let v:i32 = lit.var().into();
+                    v
+                } else {
+                    let v:i32 = lit.var().into();
+                    -v
+                };
+                write!(file, "{} ", lit_value)?;
+            }
+            writeln!(file, "0")?;
+        }
+        for clause_ref in self.cdb.temporary.clone() {
+            let clause = self.cdb.get(clause_ref);
+            for lit in clause.slice() {
+                let lit_value = if lit.polarity() {
+                    let v:i32 = lit.var().into();
+                    v
+                } else {
+                    let v:i32 = lit.var().into();
+                    -v
+                };
                 write!(file, "{} ", lit_value)?;
             }
             writeln!(file, "0")?;
@@ -78,9 +137,15 @@ impl Solver {
 
         // Write assumptions if any
         if !self.assump.is_empty() {
-            writeln!(file, "c Assumptions:")?;
+            // writeln!(file, "c Assumptions:")?;
             for lit in self.assump.iter() {
-                let lit_value = if lit.polarity() { lit.var().into() } else { -(lit.var().into() as i32) };
+                let lit_value = if lit.polarity() {
+                    let v:i32 = lit.var().into();
+                    v
+                } else {
+                    let v:i32 = lit.var().into();
+                    -v
+                };
                 write!(file, "{} ", lit_value)?;
             }
             writeln!(file, "0")?;
@@ -314,7 +379,18 @@ impl Solver {
         };
         self.clean_leanrt(true);
         self.simplify();
-        self.search_with_restart(assump)
+        let res = self.search_with_restart(assump);
+        // write problem to file
+        let write_sat_problem_to_file = true;
+        if write_sat_problem_to_file {
+            let path = format!("inductive_{}.dimacs", self.statistic.num_solve);
+            if let Err(e) = self.export_to_dimacs(&path) {
+                eprintln!("Error writing to file: {}", e);
+            } else {
+                println!("Inductive problem written to {}", path);
+            }
+        }
+        res
     }
 
     pub fn solve(&mut self, assump: &[Lit], constraint: Vec<LitVec>) -> bool {
@@ -365,14 +441,6 @@ impl Solver {
                 }
             }
             assert!(!self.ts.cube_subsume_init(&ans));
-        }
-
-        // write problem to file
-        let path = format!("inductive_{}.cnf", self.id.unwrap());
-        if let Err(e) = self.export_to_dimacs(&path) {
-            eprintln!("Error writing to file: {}", e);
-        } else {
-            println!("Inductive problem written to {}", path);
         }
 
         ans
@@ -469,7 +537,8 @@ impl Satif for Solver {
     }
 
     fn solve(&mut self, assumps: &[Lit]) -> bool {
-        self.solve_inner(assumps, vec![], true)
+        let res = self.solve_inner(assumps, vec![], true);
+        res
     }
 
     fn solve_with_constraint(&mut self, assumps: &[Lit], constraint: Vec<LitVec>) -> bool {
