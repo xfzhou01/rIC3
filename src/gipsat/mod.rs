@@ -24,6 +24,8 @@ use search::Value;
 use simplify::Simplify;
 pub use statistic::SolverStatistic;
 use vsids::Vsids;
+use std::fs::File;
+use std::io::{self, Write};
 
 pub struct Solver {
     id: Option<usize>,
@@ -56,6 +58,36 @@ pub struct Solver {
     pub statistic: SolverStatistic,
     #[allow(unused)]
     options: Options,
+}
+
+impl Solver {
+    pub fn export_to_dimacs(&self, path: &str) -> io::Result<()> {
+        let mut file = File::create(path)?;
+
+        // Write the problem header
+        writeln!(file, "p cnf {} {}", self.num_var(), self.cdb.num_clauses())?;
+
+        // Write the clauses
+        for clause in self.cdb.clauses() {
+            for lit in clause.lits() {
+                let lit_value = if lit.polarity() { lit.var().into() } else { -(lit.var().into() as i32) };
+                write!(file, "{} ", lit_value)?;
+            }
+            writeln!(file, "0")?;
+        }
+
+        // Write assumptions if any
+        if !self.assump.is_empty() {
+            writeln!(file, "c Assumptions:")?;
+            for lit in self.assump.iter() {
+                let lit_value = if lit.polarity() { lit.var().into() } else { -(lit.var().into() as i32) };
+                write!(file, "{} ", lit_value)?;
+            }
+            writeln!(file, "0")?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Solver {
@@ -334,6 +366,15 @@ impl Solver {
             }
             assert!(!self.ts.cube_subsume_init(&ans));
         }
+
+        // write problem to file
+        let path = format!("inductive_{}.cnf", self.id.unwrap());
+        if let Err(e) = self.export_to_dimacs(&path) {
+            eprintln!("Error writing to file: {}", e);
+        } else {
+            println!("Inductive problem written to {}", path);
+        }
+
         ans
     }
 

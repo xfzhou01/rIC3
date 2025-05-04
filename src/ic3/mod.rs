@@ -99,6 +99,8 @@ impl IC3 {
     }
 
     fn generalize(&mut self, mut po: ProofObligation, mic_type: MicType) -> bool {
+        // println!("XF: generalize:");
+
         if self.options.ic3.inn && self.ts.cube_subsume_init(&po.lemma) {
             po.frame += 1;
             self.add_obligation(po.clone());
@@ -110,6 +112,8 @@ impl IC3 {
             MicType::MultiClauses(_, num_clauses) => num_clauses > 1,
             _ => false,
         };
+        // println!("XF: mic_type: {:?}", mic_type);
+        // println!("XF: is_multi_clauses: {:?}", is_multi_clauses);
 
         if is_multi_clauses {
             // 获取归纳核心，避免多重可变借用

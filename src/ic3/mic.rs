@@ -286,6 +286,8 @@ impl IC3 {
         parameter: DropVarParameter,
         num_clauses: usize,
     ) -> Vec<LitVec> {
+        //println!("entering mic_by_multi_clauses");
+        //println!("num_clauses: {}", num_clauses);
         let start = Instant::now();
         
         let domain_needs_handling = parameter.level == 0;
@@ -296,7 +298,7 @@ impl IC3 {
         self.statistic.avg_mic_cube_len += cube.len();
         self.statistic.num_mic += 1;
         
-        let mut variants = Vec::new();
+        let mut variants: Vec<(LitVec, bool, bool)> = Vec::new();
         
         variants.push((cube.clone(), self.options.ic3.topo_sort, self.options.ic3.reverse_sort));
         
@@ -335,8 +337,11 @@ impl IC3 {
                 }
             }
         }
+        println!("variants: {:?}", variants);
+        println!("num variants: {}", variants.len());
         
-        let mut clauses = Vec::new();
+        
+        let mut clauses: Vec<LitVec> = Vec::new();
         
         for (variant_cube, topo_sort, reverse_sort) in variants {
             if clauses.len() >= num_clauses {
@@ -369,7 +374,7 @@ impl IC3 {
                 }
                 
                 let result_cube = self.mic_by_drop_var(frame, sorted_cube, constraint, parameter, false);
-                
+                println!("Hybrid variant result: {:?}", result_cube);
                 if !clauses.contains(&result_cube) {
                     clauses.push(result_cube);
                     self.statistic.unique_multi_clauses += 1;
@@ -398,9 +403,10 @@ impl IC3 {
                         .chain(variant_cube.iter().copied()),
                 );
             }
-            
+            // println!("Standard variant before: {:?}", variant_cube);
+            // println!("parameter: {:?}", parameter);
             let result_cube = self.mic_by_drop_var(frame, variant_cube, constraint, parameter, false);
-            
+            // println!("Standard variant result: {:?}", result_cube);
             self.options.ic3.topo_sort = original_topo_sort;
             self.options.ic3.reverse_sort = original_reverse_sort;
             self.options.ic3.hybrid_sort = original_hybrid_sort;
@@ -415,6 +421,7 @@ impl IC3 {
             if domain_needs_handling {
                 self.solvers[frame - 1].unset_domain();
             }
+            //
         }
         
         self.statistic.block_mic_time += start.elapsed();
@@ -428,6 +435,8 @@ impl IC3 {
         constraint: &[LitVec],
         mic_type: MicType,
     ) -> LitVec {
+        // println!("entering mic");
+        // println!("MicType: {:?}", mic_type);
         match mic_type {
             MicType::NoMic => cube,
             MicType::DropVar(parameter) => {
@@ -468,6 +477,8 @@ impl IC3 {
         constraint: &[LitVec],
         mic_type: MicType,
     ) -> Vec<LitVec> {
+        //println!("entering mic_multi");
+        //println!("MicType: {:?}", mic_type);
         match mic_type {
             MicType::NoMic => vec![cube],
             MicType::DropVar(parameter) => {
