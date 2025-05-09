@@ -265,7 +265,7 @@ impl IC3 {
         let final_cube_size = mic.len();
         let size_reduction = original_cube_size as f64 - final_cube_size as f64;
         let cube_sum_mic: i32 = mic.iter().map(|lit| lit.var().0 as i32).sum();
-        let cube_sum_po = po.lemma.iter().map(|lit| lit.var().0 as i32).sum();
+        let cube_sum_po: f64 = po.lemma.iter().map(|lit| lit.var().0 as f64).sum();
         let max_lit_value = mic.iter().map(|lit| lit.var().0).max().unwrap_or(0);
         let final_cube_score = mic.len() as f64 * max_lit_value as f64 - cube_sum_mic as f64;
         let po_score = po.lemma.len() as f64 * max_lit_value as f64 - cube_sum_po as f64;
