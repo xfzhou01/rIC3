@@ -53,6 +53,7 @@ const CTX_TOTAL_MIC_ARMS: usize = NUM_DYNAMIC_HEURISTIC_ARMS + NUM_FIXED_MIC_CON
 // Reward weights - pushing power vs size reduction
 const PUSHING_POWER_WEIGHT: f64 = 0.6;
 const SIZE_REDUCTION_WEIGHT: f64 = 0.4;
+const CUBE_SCORE_DIFF_WEIGHT: f64 = 0.2; // Weight for cube score difference
 
 // Context dimension (features + bias)
 const CONTEXT_DIM: usize = 5; // [frame, lemma_len, act, depth, bias]
@@ -263,6 +264,13 @@ impl IC3 {
         let mic = self.mic(po.frame, mic_core.clone(), &[], mic_type_to_use);
         let final_cube_size = mic.len();
         let size_reduction = original_cube_size as f64 - final_cube_size as f64;
+        let cube_sum_mic: i32 = mic.iter().map(|lit| lit.var().0 as i32).sum();
+        let cube_sum_po = po.lemma.iter().map(|lit| lit.var().0 as i32).sum();
+        let max_lit_value = mic.iter().map(|lit| lit.var().0).max().unwrap_or(0);
+        let final_cube_score = mic.len() as f64 * max_lit_value as f64 - cube_sum_mic as f64;
+        let po_score = po.lemma.len() as f64 * max_lit_value as f64 - cube_sum_po as f64;
+        let cube_score_diff = final_cube_score - po_score;
+        let cube_score_diff_normalized = cube_score_diff / (max_lit_value as f64 + 1.0);
         
         // Push the lemma and track the result
         let (pushed_frame, final_mic) = self.push_lemma(po.frame, mic);
@@ -282,7 +290,8 @@ impl IC3 {
             
             let combined_reward = 
                 PUSHING_POWER_WEIGHT * pushing_power + 
-                size_reduction_component;
+                size_reduction_component + 
+                CUBE_SCORE_DIFF_WEIGHT * cube_score_diff_normalized;
             
             // Log detailed information if verbose
             if self.options.verbose > 3 {
