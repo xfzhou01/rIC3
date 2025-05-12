@@ -16,8 +16,18 @@ use std::{
     process::exit,
     ptr,
 };
-
+use std::thread;
+use std::time::Duration;
+use std::process;
 fn main() {
+
+    // set the timeout = 3600s
+    thread::spawn(|| {
+        thread::sleep(Duration::from_secs(3600)); 
+        println!("Time's up! Exiting...");
+        process::exit(124); // 
+    });
+
     procspawn::init();
     fs::create_dir_all("/tmp/rIC3").unwrap();
     let mut options = Options::parse();
