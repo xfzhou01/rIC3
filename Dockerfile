@@ -20,4 +20,4 @@ COPY ./target/release/rIC3 .
 # FROM ubuntu:latest
 # COPY --from=builder /root/rIC3/target/release/rIC3 /usr/local/bin/
 
-ENTRYPOINT ["rIC3"]
+ENTRYPOINT ["timeout","3600","rIC3"]
