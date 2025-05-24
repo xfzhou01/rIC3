@@ -232,7 +232,7 @@ impl IC3 {
         self.activity.sort_by_activity(&mut cube, true);
         let mut keep = GHashSet::new();
         let mut i = 0;
-        while i < cube.len() {
+        while i < cube.len() { 
             if keep.contains(&cube[i]) {
                 i += 1;
                 continue;

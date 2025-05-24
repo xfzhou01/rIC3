@@ -15,6 +15,7 @@ use rand::{SeedableRng, rngs::StdRng};
 use satif::Satif;
 use statistic::Statistic;
 use std::{iter::once, time::Instant};
+use std::collections::HashMap;
 
 mod activity;
 mod frame;
@@ -55,7 +56,7 @@ const PUSHING_POWER_WEIGHT: f64 = 0.6;
 const SIZE_REDUCTION_WEIGHT: f64 = 0.4;
 
 // Context dimension (features + bias)
-const CONTEXT_DIM: usize = 5; // [frame, lemma_len, act, depth, bias]
+const CONTEXT_DIM: usize = 7; // [frame, lemma_len, act, depth, bias]
 type MatrixDD = DMatrix<f64>;
 type VectorD = DVector<f64>;
 
@@ -85,6 +86,10 @@ pub struct IC3 {
     ctx_mab_b: Vec<VectorD>,          // One vector per arm
     ctx_mab_theta: Vec<VectorD>,      // Store theta per arm
     ctx_mab_arm_pulls: Vec<usize>,    // Count of pulls per arm for statistics
+
+    // the global proving history statistics
+    cube_count: HashMap<Lemma, usize>,
+    cube_pred_count: HashMap<Lemma, usize>,
 }
 
 impl IC3 {
@@ -106,6 +111,8 @@ impl IC3 {
         const MAX_EXPECTED_LEN: f64 = 50.0;
         const MAX_EXPECTED_ACT: f64 = 100.0;
         const MAX_EXPECTED_DEPTH: f64 = 50.0;
+        const MAX_EXPECTED_PO_COUNT: f64 = 20.0;
+        const MAX_EXPECTED_PO_PRED_COUNT: f64 = 50.0;
 
         let frame_feat = Self::normalize_feature(po.frame as f64, 0.0, MAX_EXPECTED_FRAME);
         let len_feat = Self::normalize_feature(po.lemma.len() as f64, 1.0, MAX_EXPECTED_LEN);
@@ -113,8 +120,13 @@ impl IC3 {
         let depth_feat = Self::normalize_feature(po.depth as f64, 0.0, MAX_EXPECTED_DEPTH);
         let bias = 1.0;
 
+        let po_count = Self::normalize_feature(*self.cube_count.get(&po.lemma).unwrap_or(&0) as f64, 0.0, MAX_EXPECTED_PO_COUNT);
+        let po_pred_count = Self::normalize_feature(*self.cube_pred_count.get(&po.lemma).unwrap_or(&0) as f64, 0.0, MAX_EXPECTED_PO_PRED_COUNT);
+
         // Ensure this matches CONTEXT_DIM
-        VectorD::from_column_slice(&[frame_feat, len_feat, act_feat, depth_feat, bias])
+        VectorD::from_column_slice(&[frame_feat, len_feat, act_feat, depth_feat,
+            po_count, po_pred_count,
+            bias])
     }
 
     fn extend(&mut self) {
@@ -164,12 +176,26 @@ impl IC3 {
         (self.level() + 1, cube)
     }
 
+    fn update_po_count(&mut self, po: &ProofObligation) {
+        let count = self.cube_count.entry(po.lemma.clone()).or_insert(0);
+        *count += 1;
+    }
+
+    fn update_po_pred_count(&mut self, po: &ProofObligation) {
+        let count = self.cube_pred_count.entry(po.lemma.clone()).or_insert(0);
+        *count += 1;
+    }
+
+
+
+
     fn generalize(&mut self, mut po: ProofObligation) -> bool {
         if self.options.ic3.inn && self.ts.cube_subsume_init(&po.lemma) {
             po.frame += 1;
             self.add_obligation(po.clone());
             return self.add_lemma(po.frame - 1, po.lemma.cube().clone(), false, Some(po));
         }
+        self.update_po_count(&po);
         
         let mic_core = self.solvers[po.frame - 1].inductive_core();
         let original_cube_size = mic_core.len();
@@ -408,6 +434,10 @@ impl IC3 {
                 }
             } else {
                 let (model, inputs) = self.get_pred(po.frame, true);
+
+                // record the current po and predecessor
+                self.update_po_pred_count(&po);
+
                 self.add_obligation(ProofObligation::new(
                     po.frame - 1,
                     Lemma::new(model),
@@ -779,6 +809,8 @@ impl IC3 {
             ctx_mab_b: vec![VectorD::zeros(CONTEXT_DIM); CTX_TOTAL_MIC_ARMS],
             ctx_mab_theta: vec![VectorD::zeros(CONTEXT_DIM); CTX_TOTAL_MIC_ARMS],
             ctx_mab_arm_pulls: vec![0; CTX_TOTAL_MIC_ARMS],
+            cube_count: HashMap::new(),
+            cube_pred_count: HashMap::new(),
         }
     }
 }
