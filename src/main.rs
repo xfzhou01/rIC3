@@ -17,8 +17,13 @@ use std::{
     ptr,
 };
 
+shadow_rs::shadow!(build);
+
 fn main() {
     procspawn::init();
+    println!("Git commit hash: {}", build::COMMIT_HASH);
+    println!("Git branch: {}", build::BRANCH);
+    println!("Git commit date: {}", build::COMMIT_DATE);
     fs::create_dir_all("/tmp/rIC3").unwrap();
     let mut options = Options::parse();
     options.model = options.model.canonicalize().unwrap();
