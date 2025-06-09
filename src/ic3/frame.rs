@@ -83,6 +83,27 @@ impl Frames {
         }
     }
 
+    // pub fn get_border_cube_size(&self) -> usize {
+    //     if self.frames.is_empty() {
+    //         return 0;
+    //     }
+    //     let last_frame = self.frames.last().unwrap();
+    //     if last_frame.is_empty() {
+    //         return 0;
+    //     }
+    //     last_frame[0].len()
+    // }
+
+    pub fn get_level_cube_size(&self, level: usize) -> usize {
+        if level >= self.frames.len() {
+            return 0;
+        }
+        if self.frames[level].is_empty() {
+            return 0;
+        }
+        self.frames[level][0].len()
+    }
+
     #[inline]
     pub fn trivial_contained<'a>(
         &'a mut self,

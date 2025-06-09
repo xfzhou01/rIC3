@@ -51,11 +51,11 @@ const NUM_DYNAMIC_HEURISTIC_ARMS: usize = 3;
 const CTX_TOTAL_MIC_ARMS: usize = NUM_DYNAMIC_HEURISTIC_ARMS + NUM_FIXED_MIC_CONFIG_ARMS;
 
 // Reward weights - pushing power vs size reduction
-const PUSHING_POWER_WEIGHT: f64 = 0.6;
-const SIZE_REDUCTION_WEIGHT: f64 = 0.4;
+// const PUSHING_POWER_WEIGHT: f64 = 0.6;
+// const SIZE_REDUCTION_WEIGHT: f64 = 0.4;
 
 // Context dimension (features + bias)
-const CONTEXT_DIM: usize = 5; // [frame, lemma_len, act, depth, bias]
+const CONTEXT_DIM: usize = 7; // [frame, lemma_len, act, depth, bias]
 type MatrixDD = DMatrix<f64>;
 type VectorD = DVector<f64>;
 
@@ -85,6 +85,10 @@ pub struct IC3 {
     ctx_mab_b: Vec<VectorD>,          // One vector per arm
     ctx_mab_theta: Vec<VectorD>,      // Store theta per arm
     ctx_mab_arm_pulls: Vec<usize>,    // Count of pulls per arm for statistics
+
+    // cube size
+    average_cube_size: f64,
+    cube_size_count: usize,
 }
 
 impl IC3 {
@@ -100,21 +104,53 @@ impl IC3 {
     }
 
     // Extract context vector from proof obligation
-    fn get_context_vector(&self, po: &ProofObligation) -> VectorD {
+    fn get_context_vector(&mut self, po: &ProofObligation) -> VectorD {
         // Define expected ranges (these need tuning based on observation!)
-        const MAX_EXPECTED_FRAME: f64 = 100.0;
-        const MAX_EXPECTED_LEN: f64 = 50.0;
+        //const MAX_EXPECTED_FRAME: f64 = 100.0;
+        //const MAX_EXPECTED_LEN: f64 = 50.0;
         const MAX_EXPECTED_ACT: f64 = 100.0;
-        const MAX_EXPECTED_DEPTH: f64 = 50.0;
+        //const MAX_EXPECTED_DEPTH: f64 = 50.0;
 
-        let frame_feat = Self::normalize_feature(po.frame as f64, 0.0, MAX_EXPECTED_FRAME);
-        let len_feat = Self::normalize_feature(po.lemma.len() as f64, 1.0, MAX_EXPECTED_LEN);
+        //let frame_feat = Self::normalize_feature(po.frame as f64, 0.0, MAX_EXPECTED_FRAME);
+        //let len_feat = Self::normalize_feature(po.lemma.len() as f64, 1.0, MAX_EXPECTED_LEN);
         let act_feat = Self::normalize_feature(po.act, 0.0, MAX_EXPECTED_ACT);
-        let depth_feat = Self::normalize_feature(po.depth as f64, 0.0, MAX_EXPECTED_DEPTH);
+        //let depth_feat = Self::normalize_feature(po.depth as f64, 0.0, MAX_EXPECTED_DEPTH);
         let bias = 1.0;
 
+        // 1. relative level
+        let relative_level = po.frame as f64 / self.level() as f64;
+
+        // 2. the relative complexity of the lemma
+        let total_cube_size = self.cube_size_count as f64 * self.average_cube_size;
+        self.cube_size_count += 1;
+        self.average_cube_size = (total_cube_size + po.lemma.len() as f64) / self.cube_size_count as f64;
+        let relative_cube_size = po.lemma.len() as f64 / self.average_cube_size.max(1.0);
+
+        // 3. potential of push
+        let potential_of_push = 1.0 - relative_level;
+
+        // 4. relative depth
+        let relative_depth = po.frame as f64 / (po.frame + po.depth) as f64;
+
+        // 5. frame
+        // the frame saturation ratio of current level, whether requires better generalization
+        let frame_saturation = (self.frame.get_level_cube_size(po.frame) as f64 / 100.0).min(1.0);
+
+
+
+
         // Ensure this matches CONTEXT_DIM
-        VectorD::from_column_slice(&[frame_feat, len_feat, act_feat, depth_feat, bias])
+        //VectorD::from_column_slice(&[frame_feat, len_feat, act_feat, depth_feat, bias])
+        VectorD::from_column_slice(&[
+            relative_level, 
+            relative_cube_size, 
+            potential_of_push, 
+            relative_depth, 
+            frame_saturation,
+            act_feat,
+            bias
+        ])
+
     }
 
     fn extend(&mut self) {
@@ -267,23 +303,65 @@ impl IC3 {
         // Push the lemma and track the result
         let (pushed_frame, final_mic) = self.push_lemma(po.frame, mic);
         let pushing_power = (pushed_frame as f64) - (po.frame as f64);
+
+        // Calculate size reduction and pushing power ratios
+        // the basic reward component calculation
+        let size_reduction_ratio: f64 = if original_cube_size > 0 {
+            size_reduction / original_cube_size as f64
+        } else {
+            0.0 // Avoid division by zero
+        };
+        let max_possible_push: f64 = self.level() as f64 - po.frame as f64 + 1.0;
+        let pushing_power_ratio: f64 = if max_possible_push > 0.0 {
+            pushing_power / max_possible_push
+        } else {
+            0.0 // Avoid division by zero
+        };
+
         
         if self.options.ic3.enable_ctx_mab {
             // --- MAB Reward Calculation & Update ---
             let context_vec = self.get_context_vector(&po);
             
+            // 1.
+            // quality of the push based on size reduction and pushing power
             // Calculate combined reward with stronger penalty for growth
-            let size_reduction_component = if size_reduction >= 0.0 {
-                SIZE_REDUCTION_WEIGHT * size_reduction
+            let effective_push: bool = pushing_power > 0.0;
+            let push_quality = if effective_push {
+                pushing_power_ratio
             } else {
-                // Apply stronger penalty for growth using the configurable factor
-                SIZE_REDUCTION_WEIGHT * size_reduction * self.options.ic3.mab_growth_penalty_factor
+                -0.1 // Penalize if no push
             };
+
+            // 2.
+            // quality of generalization
+            let generalization_quality = if size_reduction_ratio > 0.5 && pushing_power_ratio > 0.3 {
+                0.3  // Good generalization (ideal), push far, generalization good
+            } else if size_reduction_ratio > 0.7 && pushing_power_ratio < 0.1 {
+                -0.2 // over generalization, generalization too strong, push not far
+            } else {
+                0.0
+            };
+
+            // 3.
+            // spcial bonus 
+            // 3.1 push out of frontier
+            let mut special_bouns = 0.0;
+            if pushed_frame >= self.level() {
+                special_bouns += 0.4; // Bonus for pushing to the end
+            } 
+            // 3.2 complete generalization
+            if final_cube_size == 1 {
+                special_bouns += 0.2; // Bonus for complete generalization
+            }
+            // 3.3 push at high-level
+            if po.frame as f64 > 0.7 * (self.level() as f64) && pushing_power > 0.0 {
+                special_bouns += 0.1; // Bonus for pushing at high level
+            }
+
             
-            let combined_reward = 
-                PUSHING_POWER_WEIGHT * pushing_power + 
-                size_reduction_component;
-            
+            let mut combined_reward = size_reduction_ratio * 0.35 + push_quality * 0.45 + generalization_quality + special_bouns;
+            combined_reward = combined_reward.clamp(-0.5, 2.0);
             // Log detailed information if verbose
             if self.options.verbose > 3 {
                 // Log MAB decision data to CSV
@@ -298,7 +376,7 @@ impl IC3 {
                 if let Ok(mut file) = file {
                     // Check if file is empty and write header if needed
                     if file.metadata().unwrap().len() == 0 {
-                        let _ = writeln!(file, "frame,arm,activity,depth,cube_size,pushing_power,size_reduction,size_reduction_component,combined_reward");
+                        let _ = writeln!(file, "frame,arm,activity,depth,cube_size,pushing_power,size_reduction,size_reduction_ratio,combined_reward");
                     }
                     
                     // Write the decision data with size_reduction_component
@@ -312,7 +390,7 @@ impl IC3 {
                         original_cube_size,
                         pushing_power,
                         size_reduction,
-                        size_reduction_component,
+                        size_reduction_ratio,
                         combined_reward
                     );
                 }
@@ -780,6 +858,8 @@ impl IC3 {
             ctx_mab_b: vec![VectorD::zeros(CONTEXT_DIM); CTX_TOTAL_MIC_ARMS],
             ctx_mab_theta: vec![VectorD::zeros(CONTEXT_DIM); CTX_TOTAL_MIC_ARMS],
             ctx_mab_arm_pulls: vec![0; CTX_TOTAL_MIC_ARMS],
+            average_cube_size: 0.0,
+            cube_size_count: 0,
         }
     }
 }
