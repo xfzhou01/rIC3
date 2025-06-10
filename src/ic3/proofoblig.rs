@@ -95,7 +95,7 @@ impl ProofObligation {
 
     pub fn push_to(&mut self, frame: usize) {
         for _ in self.frame..frame {
-            self.act *= 0.6;
+            self.act *= 0.95;
         }
         self.frame = frame;
     }
